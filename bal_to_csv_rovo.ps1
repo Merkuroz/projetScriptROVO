@@ -6,7 +6,7 @@ param([switch]$DryRun, [switch]$Silent)
 
 # ========== CONFIGURATION ==========
 $OutputDir = Join-Path $env:USERPROFILE "Documents"
-$DefaultAssignee = "frederic.izard@enedis.fr"
+$DefaultAssignee = ""
 $DefaultPriority = "Moyenne"
 $DefaultPriorityBug = "Haute"
 $ProcessedFolder = "Traite_Jira"
