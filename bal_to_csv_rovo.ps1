@@ -40,7 +40,9 @@ function Normalize-Name {
 function Log-Msg {
     param([string]$Level="INFO", [string]$Message)
     $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
-    Write-Host "[$ts] $Level $Message" -ForegroundColor $(if($Level -eq "ERROR"){"Red"} elseif($Level -eq "WARN"){"Yellow"} elseif($Level -eq "DEBUG"){"DarkGray"} else{"White"})
+    $line = "[$ts] $Level $Message"
+    Write-Host $line -ForegroundColor $(if($Level -eq "ERROR"){"Red"} elseif($Level -eq "WARN"){"Yellow"} elseif($Level -eq "DEBUG"){"DarkGray"} else{"White"})
+    try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 -ErrorAction SilentlyContinue } catch {}
 }
 
 # ========== FONCTIONS OUTLOOK (CORRIGEES) ==========
@@ -332,7 +334,7 @@ try {
         $csvHeaders = @("Projet","Type de ticket","Statut","Resume","Description","Priorite","Assigne","Rapporteur","Date de reception")
         $csvContent = ($csvHeaders -join ";") + "`r`n"
         foreach ($line in $csvLines) {
-            $csvContent += @(
+            $row = @(
                 $line.Projet,
                 $line.Type_de_ticket,
                 $line.Statut,
@@ -342,7 +344,8 @@ try {
                 $line.Assigne,
                 $line.Rapporteur,
                 $line.Date_de_reception
-            ) -join ";" + "`r`n"
+            ) -join ";"
+            $csvContent += $row + "`r`n"
         }
         $csvContent | Out-File -FilePath $CsvFile -Encoding UTF8
         Log-Msg INFO "CSV genere: $CsvFile ($($csvLines.Count) lignes)"
@@ -353,6 +356,13 @@ try {
     Log-Msg INFO "========================================"
     Log-Msg INFO "FIN: $totalProcessed mails traites"
     Log-Msg INFO "========================================"
+
+    # Sauvegarde des Message-ID traites pour le dedoublonnage ulterieur
+    try {
+        $processedIds.Keys | Out-File -FilePath $ProcessedIdsFile -Encoding UTF8 -ErrorAction SilentlyContinue
+    } catch {
+        Log-Msg WARN "Impossible de sauvegarder les Message-ID traites: $_"
+    }
 
 } catch {
     Log-Msg ERROR "Erreur fatale: $_"
