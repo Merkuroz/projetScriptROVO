@@ -6,10 +6,9 @@ param([switch]$DryRun, [switch]$Silent)
 
 # ========== CONFIGURATION ==========
 $OutputDir = Join-Path $env:USERPROFILE "Documents"
-$DefaultAssignee = ""
+$DefaultAssignee = "frederic.izard@enedis.fr"
 $DefaultPriority = "Moyenne"
 $DefaultPriorityBug = "Haute"
-$ProcessedFolder = "Traite_Jira"
 $MaxFetchPerBal = 50
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not $ScriptDir) { $ScriptDir = $PWD.Path }
