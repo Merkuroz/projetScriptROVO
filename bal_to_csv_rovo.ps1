@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Script corrigé pour traiter les BAL Enedis via Outlook COM
+  Script corrigÃ© pour traiter les BAL Enedis via Outlook COM
 #>
 param([switch]$DryRun, [switch]$Silent)
 
@@ -9,7 +9,6 @@ $OutputDir = Join-Path $env:USERPROFILE "Documents"
 $DefaultAssignee = "frederic.izard@enedis.fr"
 $DefaultPriority = "Moyenne"
 $DefaultPriorityBug = "Haute"
-$ProcessedFolder = "Traite_Jira"
 $MaxFetchPerBal = 50
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not $ScriptDir) { $ScriptDir = $PWD.Path }
@@ -33,7 +32,7 @@ function Normalize-Name {
     param([string]$name)
     $name = $name.ToLower()
     # Conserver les tirets et underscores
-    $name = $name -replace '[àâä]', 'a' -replace '[éèêë]', 'e' -replace '[îï]', 'i' -replace '[ôö]', 'o' -replace '[ùûü]', 'u' -replace 'ç', 'c'
+    $name = $name -replace '[Ã Ã¢Ã¤]', 'a' -replace '[Ã©Ã¨ÃªÃ«]', 'e' -replace '[Ã®Ã¯]', 'i' -replace '[Ã´Ã¶]', 'o' -replace '[Ã¹Ã»Ã¼]', 'u' -replace 'Ã§', 'c'
     $name = $name -replace '[^a-z0-9\\-_]', ''  # Garde a-z, 0-9, -, _
     return $name
 }
@@ -337,8 +336,8 @@ try {
                 $line.Projet,
                 $line.Type_de_ticket,
                 $line.Statut,
-                $line.Resume -replace '"','""',
-                $line.Description -replace '"','""',
+                ($line.Resume -replace '"','""'),
+                ($line.Description -replace '"','""'),
                 $line.Priorite,
                 $line.Assigne,
                 $line.Rapporteur,
