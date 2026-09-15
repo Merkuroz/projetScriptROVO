@@ -329,8 +329,9 @@ try {
         }
     }
 
-    # Generation CSV
-    if ($csvLines.Count -gt 0) {
+    # Generation CSV - le fichier est TOUJOURS cree (au minimum l'en-tete),
+    # meme si aucun mail n'a ete traite, afin de ne jamais laisser un CSV absent/vide.
+    if (-not $DryRun) {
         $csvHeaders = @("Projet","Type de ticket","Statut","Resume","Description","Priorite","Assigne","Rapporteur","Date de reception")
         $csvContent = ($csvHeaders -join ";") + "`r`n"
         foreach ($line in $csvLines) {
@@ -347,10 +348,13 @@ try {
             ) -join ";"
             $csvContent += $row + "`r`n"
         }
-        $csvContent | Out-File -FilePath $CsvFile -Encoding UTF8
-        Log-Msg INFO "CSV genere: $CsvFile ($($csvLines.Count) lignes)"
+        $csvDir = Split-Path -Parent $CsvFile
+        if ($csvDir -and -not (Test-Path $csvDir)) { New-Item -ItemType Directory -Path $csvDir -Force | Out-Null }
+        # UTF-8 avec BOM pour une lecture correcte des accents dans Excel FR
+        [System.IO.File]::WriteAllText($CsvFile, $csvContent, (New-Object System.Text.UTF8Encoding($true)))
+        Log-Msg INFO "CSV genere: $CsvFile ($($csvLines.Count) ligne(s) de donnees)"
     } else {
-        Log-Msg INFO "Aucun mail a exporter"
+        Log-Msg INFO "DryRun: CSV non ecrit ($($csvLines.Count) ligne(s) pretes)"
     }
 
     Log-Msg INFO "========================================"
