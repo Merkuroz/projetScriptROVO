@@ -384,6 +384,7 @@ try {
                     Assigne = $DefaultAssignee
                     Rapporteur = $from
                     Date_de_reception = $mail.ReceivedTime.ToString("yyyy-MM-dd HH:mm:ss")
+                    Lien_mail = "outlook:" + $mail.EntryID
                 }
 
                 $processedIds[$mailId] = $true
@@ -400,7 +401,7 @@ try {
     # Generation CSV - le fichier est TOUJOURS cree (au minimum l'en-tete),
     # meme si aucun mail n'a ete traite, afin de ne jamais laisser un CSV absent/vide.
     if (-not $DryRun) {
-        $csvHeaders = @("Projet","Type de ticket","Statut","Resume","Description","Priorite","Assigne","Rapporteur","Date de reception")
+        $csvHeaders = @("Projet","Type de ticket","Statut","Resume","Description","Priorite","Assigne","Rapporteur","Date de reception","Lien mail")
         $csvContent = ($csvHeaders -join ";") + "`r`n"
         foreach ($line in $csvLines) {
             $row = @(
@@ -412,7 +413,8 @@ try {
                 $line.Priorite,
                 $line.Assigne,
                 $line.Rapporteur,
-                $line.Date_de_reception
+                $line.Date_de_reception,
+                $line.Lien_mail
             ) -join ";"
             $csvContent += $row + "`r`n"
         }
