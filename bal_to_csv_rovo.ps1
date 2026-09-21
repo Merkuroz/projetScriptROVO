@@ -17,7 +17,6 @@ $LogFile = Join-Path $ScriptDir "log_bal_to_csv_$LogDate.txt"
 $ProcessedIdsFile = Join-Path $ScriptDir "processed_msgids.txt"
 $LockFile = Join-Path $ScriptDir "bal_to_csv.lock"
 $CsvFile = Join-Path $ScriptDir "bal_to_jira_$LogDate.csv"
-$MsgDir = Join-Path $ScriptDir "mails_exportes"
 
 $Mailboxes = @(
     @{ Address = "DFP-UOF-IPED-DIP"; Name = "DFP-UOF-IPED-DIP" },
@@ -288,25 +287,6 @@ function Ensure-JiraCategory {
     }
 }
 
-function Save-MailAsMsg {
-    param($Mail, [string]$Dir)
-    try {
-        if ($Mail -eq $null) { return $null }
-        if (-not (Test-Path $Dir)) { New-Item -ItemType Directory -Path $Dir -Force | Out-Null }
-        $safeSubject = ($Mail.Subject -replace '[\\/:*?"<>|]', '_').Trim()
-        if ($safeSubject.Length -gt 80) { $safeSubject = $safeSubject.Substring(0, 80) }
-        $stamp = $Mail.ReceivedTime.ToString("yyyyMMdd_HHmmss")
-        $fileName = "$stamp`_$safeSubject.msg"
-        $filePath = Join-Path $Dir $fileName
-        if (Test-Path $filePath) { return $filePath }
-        $Mail.SaveAs($filePath, 3)
-        return $filePath
-    } catch {
-        Log-Msg WARN "Export .msg impossible pour '$($Mail.Subject)': $_"
-        return $null
-    }
-}
-
 function Set-JiraFlag {
     param($Mail)
     try {
@@ -392,13 +372,11 @@ try {
                 if ($resume.Length -gt 120) { $resume = $resume.Substring(0, 120) + "..." }
 
                 $description = $body
+                $mailLink = "outlook:" + $mail.EntryID
+                $description = "$description`r`n`r`nLien vers le mail: $mailLink"
                 if ($description.Length -gt 3000) { $description = $description.Substring(0, 3000) + "..." }
 
-                $msgPath = $null
-                if (-not $DryRun) {
-                    Set-JiraFlag -Mail $mail
-                    $msgPath = Save-MailAsMsg -Mail $mail -Dir $MsgDir
-                }
+                if (-not $DryRun) { Set-JiraFlag -Mail $mail }
 
                 $csvLines += @{
                     Projet = $project.Key
@@ -410,7 +388,6 @@ try {
                     Assigne = $DefaultAssignee
                     Rapporteur = $from
                     Date_de_reception = $mail.ReceivedTime.ToString("yyyy-MM-dd HH:mm:ss")
-                    Lien_mail = $msgPath
                 }
 
                 $processedIds[$mailId] = $true
@@ -426,7 +403,7 @@ try {
     # Generation CSV - le fichier est TOUJOURS cree (au minimum l'en-tete),
     # meme si aucun mail n'a ete traite, afin de ne jamais laisser un CSV absent/vide.
     if (-not $DryRun) {
-        $csvHeaders = @("Projet","Type de ticket","Statut","Resume","Description","Priorite","Assigne","Rapporteur","Date de reception","Lien mail")
+        $csvHeaders = @("Projet","Type de ticket","Statut","Resume","Description","Priorite","Assigne","Rapporteur","Date de reception")
         $csvContent = ($csvHeaders -join ";") + "`r`n"
         foreach ($line in $csvLines) {
             $row = @(
@@ -438,8 +415,7 @@ try {
                 $line.Priorite,
                 $line.Assigne,
                 $line.Rapporteur,
-                $line.Date_de_reception,
-                $line.Lien_mail
+                $line.Date_de_reception
             ) -join ";"
             $csvContent += $row + "`r`n"
         }
