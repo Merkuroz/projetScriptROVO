@@ -2,7 +2,7 @@
 .SYNOPSIS
   Script corrigé pour traiter les BAL Enedis via Outlook COM
 #>
-param([switch]$DryRun, [switch]$Silent)
+param([switch]$DryRun, [switch]$Silent, [switch]$Force)
 
 # ========== CONFIGURATION ==========
 $DefaultAssignee = "frederic.izard@enedis.fr"
@@ -260,7 +260,7 @@ try {
 
     $outlook = Connect-Outlook
     $processedIds = @{}
-    if (Test-Path $ProcessedIdsFile) {
+    if (-not $Force -and (Test-Path $ProcessedIdsFile)) {
         $processedIds = @{}
         Get-Content $ProcessedIdsFile -Encoding UTF8 | ForEach-Object {
             $line = $_.Trim()
@@ -295,7 +295,7 @@ try {
 
                 $mailId = if ($headers["Message-ID"] -ne "") { $headers["Message-ID"] } else { $subject + $from + $body }
 
-                if ($processedIds.ContainsKey($mailId)) { continue }
+                if (-not $Force -and $processedIds.ContainsKey($mailId)) { continue }
 
                 $issueType = Classify-Mail -subject $subject -body $body
                 $priority = if ($issueType -eq "Anomalie") { $DefaultPriorityBug } else { $DefaultPriority }
