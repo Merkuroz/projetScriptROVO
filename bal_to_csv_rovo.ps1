@@ -17,6 +17,7 @@ $LogFile = Join-Path $ScriptDir "log_bal_to_csv_$LogDate.txt"
 $ProcessedIdsFile = Join-Path $ScriptDir "processed_msgids.txt"
 $LockFile = Join-Path $ScriptDir "bal_to_csv.lock"
 $CsvFile = Join-Path $ScriptDir "bal_to_jira_$LogDate.csv"
+$MsgDir = Join-Path $ScriptDir "mails_exportes"
 
 $Mailboxes = @(
     @{ Address = "DFP-UOF-IPED-DIP"; Name = "DFP-UOF-IPED-DIP" },
@@ -287,6 +288,25 @@ function Ensure-JiraCategory {
     }
 }
 
+function Save-MailAsMsg {
+    param($Mail, [string]$Dir)
+    try {
+        if ($Mail -eq $null) { return $null }
+        if (-not (Test-Path $Dir)) { New-Item -ItemType Directory -Path $Dir -Force | Out-Null }
+        $safeSubject = ($Mail.Subject -replace '[\\/:*?"<>|]', '_').Trim()
+        if ($safeSubject.Length -gt 80) { $safeSubject = $safeSubject.Substring(0, 80) }
+        $stamp = $Mail.ReceivedTime.ToString("yyyyMMdd_HHmmss")
+        $fileName = "$stamp`_$safeSubject.msg"
+        $filePath = Join-Path $Dir $fileName
+        if (Test-Path $filePath) { return $filePath }
+        $Mail.SaveAs($filePath, 3)
+        return $filePath
+    } catch {
+        Log-Msg WARN "Export .msg impossible pour '$($Mail.Subject)': $_"
+        return $null
+    }
+}
+
 function Set-JiraFlag {
     param($Mail)
     try {
@@ -374,6 +394,12 @@ try {
                 $description = $body
                 if ($description.Length -gt 3000) { $description = $description.Substring(0, 3000) + "..." }
 
+                $msgPath = $null
+                if (-not $DryRun) {
+                    Set-JiraFlag -Mail $mail
+                    $msgPath = Save-MailAsMsg -Mail $mail -Dir $MsgDir
+                }
+
                 $csvLines += @{
                     Projet = $project.Key
                     Type_de_ticket = $issueType
@@ -384,12 +410,11 @@ try {
                     Assigne = $DefaultAssignee
                     Rapporteur = $from
                     Date_de_reception = $mail.ReceivedTime.ToString("yyyy-MM-dd HH:mm:ss")
-                    Lien_mail = "outlook:" + $mail.EntryID
+                    Lien_mail = $msgPath
                 }
 
                 $processedIds[$mailId] = $true
                 $totalProcessed++
-                if (-not $DryRun) { Set-JiraFlag -Mail $mail }
                 Log-Msg DEBUG "Mail traite: $subject"
 
             } catch {
