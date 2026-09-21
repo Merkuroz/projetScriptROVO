@@ -2,7 +2,7 @@
 .SYNOPSIS
   Script corrigé pour traiter les BAL Enedis via Outlook COM
 #>
-param([switch]$DryRun, [switch]$Silent)
+param([switch]$DryRun, [switch]$Silent, [switch]$Force)
 
 # ========== CONFIGURATION ==========
 $DefaultAssignee = "frederic.izard@enedis.fr"
@@ -238,6 +238,24 @@ function Classify-Mail {
     return $bestType
 }
 
+# ========== TRACE D'IMPORT ==========
+function Import-TraceFile {
+    param([string]$Path)
+    $trace = @{}
+    if (Test-Path $Path) {
+        foreach ($line in (Get-Content $Path -Encoding UTF8)) {
+            $t = $line.Trim()
+            if ($t -ne "" -and -not $trace.ContainsKey($t)) { $trace[$t] = $true }
+        }
+    }
+    return $trace
+}
+
+function Save-TraceFile {
+    param([string]$Path, $Trace)
+    $Trace.Keys | Out-File -FilePath $Path -Encoding UTF8 -Force
+}
+
 # ========== MAIN SCRIPT ==========
 if (Test-Path $LockFile) {
     $pid = Get-Content $LockFile -ErrorAction SilentlyContinue
@@ -260,12 +278,8 @@ try {
 
     $outlook = Connect-Outlook
     $processedIds = @{}
-    if (Test-Path $ProcessedIdsFile) {
-        $processedIds = @{}
-        Get-Content $ProcessedIdsFile -Encoding UTF8 | ForEach-Object {
-            $line = $_.Trim()
-            if ($line -ne "") { $processedIds[$line] = $true }
-        }
+    if (-not $Force) {
+        $processedIds = Import-TraceFile -Path $ProcessedIdsFile
         Log-Msg INFO "$($processedIds.Count) Message-ID deja traites"
     }
 
@@ -295,10 +309,15 @@ try {
 
                 $mailId = if ($headers["Message-ID"] -ne "") { $headers["Message-ID"] } else { $subject + $from + $body }
 
-                if ($processedIds.ContainsKey($mailId)) { continue }
+                $isReply = ($headers["In-Reply-To"] -ne "" -or $headers["References"] -ne "")
+                if (-not $Force -and $processedIds.ContainsKey($mailId)) {
+                    # Deja importe: on ignore, sauf si c'est une reponse a un mail importe
+                    if (-not $isReply) { continue }
+                    Log-Msg INFO "Reponse recue sur un mail deja importe: $subject"
+                }
 
-                $issueType = Classify-Mail -subject $subject -body $body
-                $priority = if ($issueType -eq "Anomalie") { $DefaultPriorityBug } else { $DefaultPriority }
+                $issueType = "Tache"
+                $priority = $DefaultPriority
 
                 $resume = ($subject -replace '^(re|tr|fwd|fw):\s*', '').Trim()
                 if ($resume.Length -gt 120) { $resume = $resume.Substring(0, 120) + "..." }
@@ -362,7 +381,10 @@ try {
 
     # Sauvegarde des Message-ID traites pour le dedoublonnage ulterieur
     try {
-        $processedIds.Keys | Out-File -FilePath $ProcessedIdsFile -Encoding UTF8 -ErrorAction SilentlyContinue
+        if (-not $DryRun -and $totalProcessed -gt 0) {
+            Save-TraceFile -Path $ProcessedIdsFile -Trace $processedIds
+            Log-Msg INFO "Trace d'import mise a jour: $ProcessedIdsFile ($($processedIds.Count) Message-ID)"
+        }
     } catch {
         Log-Msg WARN "Impossible de sauvegarder les Message-ID traites: $_"
     }
