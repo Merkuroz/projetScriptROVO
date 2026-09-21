@@ -371,10 +371,10 @@ try {
                 $resume = ($subject -replace '^(re|tr|fwd|fw):\s*', '').Trim()
                 if ($resume.Length -gt 120) { $resume = $resume.Substring(0, 120) + "..." }
 
-                $description = $body
                 $mailLink = "outlook:" + $mail.EntryID
-                $description = "$description`r`n`r`nLien vers le mail: $mailLink"
+                $description = $body
                 if ($description.Length -gt 3000) { $description = $description.Substring(0, 3000) + "..." }
+                $description = "$description`r`n`r`nLien vers le mail: $mailLink"
 
                 if (-not $DryRun) { Set-JiraFlag -Mail $mail }
 
@@ -410,14 +410,18 @@ try {
                 $line.Projet,
                 $line.Type_de_ticket,
                 $line.Statut,
-                ($line.Resume -replace '"','""'),
-                ($line.Description -replace '"','""'),
+                $line.Resume,
+                $line.Description,
                 $line.Priorite,
                 $line.Assigne,
                 $line.Rapporteur,
                 $line.Date_de_reception
-            ) -join ";"
-            $csvContent += $row + "`r`n"
+            ) | ForEach-Object {
+                $v = "$_"
+                if ($null -eq $_) { $v = "" }
+                '"' + ($v -replace '"','""') + '"'
+            }
+            $csvContent += ($row -join ";") + "`r`n"
         }
         $csvDir = Split-Path -Parent $CsvFile
         if ($csvDir -and -not (Test-Path $csvDir)) { New-Item -ItemType Directory -Path $csvDir -Force | Out-Null }
