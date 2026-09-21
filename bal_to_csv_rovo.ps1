@@ -5,6 +5,7 @@
 param([switch]$DryRun, [switch]$Silent, [switch]$Force)
 
 # ========== CONFIGURATION ==========
+$JiraCategory = "a traiter dans Jira"
 $DefaultAssignee = "frederic.izard@enedis.fr"
 $DefaultPriority = "Moyenne"
 $DefaultPriorityBug = "Haute"
@@ -256,6 +257,23 @@ function Save-TraceFile {
     $Trace.Keys | Out-File -FilePath $Path -Encoding UTF8 -Force
 }
 
+function Set-JiraFlag {
+    param($Mail)
+    try {
+        if ($Mail -ne $null) {
+            $cats = $Mail.Categories
+            if (-not $cats) { $cats = "" }
+            if (("," + $cats + ",") -notlike "*" + $JiraCategory + "*") {
+                if ($cats -ne "") { $newCats = $cats + "," + $JiraCategory } else { $newCats = $JiraCategory }
+                $Mail.Categories = $newCats
+                $Mail.Save()
+            }
+        }
+    } catch {
+        Log-Msg WARN "Impossible d'appliquer la categorie '$JiraCategory': $_"
+    }
+}
+
 # ========== MAIN SCRIPT ==========
 if (Test-Path $LockFile) {
     $pid = Get-Content $LockFile -ErrorAction SilentlyContinue
@@ -339,6 +357,7 @@ try {
 
                 $processedIds[$mailId] = $true
                 $totalProcessed++
+                if (-not $DryRun) { Set-JiraFlag -Mail $mail }
                 Log-Msg DEBUG "Mail traite: $subject"
 
             } catch {
