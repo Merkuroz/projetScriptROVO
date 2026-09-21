@@ -257,6 +257,36 @@ function Save-TraceFile {
     $Trace.Keys | Out-File -FilePath $Path -Encoding UTF8 -Force
 }
 
+function Ensure-JiraCategory {
+    param($Outlook)
+    try {
+        $categories = $Outlook.GetNamespace("MAPI").Categories
+        $existing = $null
+        foreach ($cat in $categories) {
+            if ($cat.Name -eq $JiraCategory) { $existing = $cat; break }
+        }
+        if ($existing -eq $null) {
+            $usedColors = @{}
+            foreach ($cat in $categories) { $usedColors[[int]$cat.Color] = $true }
+            # Couleur souhaitee: Dark Maroon (rose fonce, valeur 25)
+            $preferred = 25
+            $palette = @(25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 12)
+            $chosen = $preferred
+            if ($usedColors.ContainsKey($preferred)) {
+                foreach ($c in $palette) {
+                    if (-not $usedColors.ContainsKey($c)) { $chosen = $c; break }
+                }
+            }
+            $newCat = $categories.Add($JiraCategory)
+            $newCat.Color = $chosen
+            $newCat.ShortcutKey = 0
+            Log-Msg INFO "Categorie '$JiraCategory' creee (couleur: $chosen)"
+        }
+    } catch {
+        Log-Msg WARN "Impossible de creer la categorie '$JiraCategory': $_"
+    }
+}
+
 function Set-JiraFlag {
     param($Mail)
     try {
@@ -295,6 +325,7 @@ try {
     Log-Msg INFO "========================================"
 
     $outlook = Connect-Outlook
+    Ensure-JiraCategory -Outlook $outlook
     $processedIds = @{}
     if (-not $Force) {
         $processedIds = Import-TraceFile -Path $ProcessedIdsFile
