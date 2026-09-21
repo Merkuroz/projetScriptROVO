@@ -297,8 +297,8 @@ try {
 
                 if (-not $Force -and $processedIds.ContainsKey($mailId)) { continue }
 
-                $issueType = Classify-Mail -subject $subject -body $body
-                $priority = if ($issueType -eq "Anomalie") { $DefaultPriorityBug } else { $DefaultPriority }
+                $issueType = "Tache"
+                $priority = $DefaultPriority
 
                 $resume = ($subject -replace '^(re|tr|fwd|fw):\s*', '').Trim()
                 if ($resume.Length -gt 120) { $resume = $resume.Substring(0, 120) + "..." }
