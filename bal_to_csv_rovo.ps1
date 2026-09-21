@@ -5,7 +5,6 @@
 param([switch]$DryRun, [switch]$Silent)
 
 # ========== CONFIGURATION ==========
-$OutputDir = Join-Path $env:USERPROFILE "Documents"
 $DefaultAssignee = "frederic.izard@enedis.fr"
 $DefaultPriority = "Moyenne"
 $DefaultPriorityBug = "Haute"
@@ -16,7 +15,7 @@ $LogDate = Get-Date -Format "yyyy-MM-dd"
 $LogFile = Join-Path $ScriptDir "log_bal_to_csv_$LogDate.txt"
 $ProcessedIdsFile = Join-Path $ScriptDir "processed_msgids.txt"
 $LockFile = Join-Path $ScriptDir "bal_to_csv.lock"
-$CsvFile = Join-Path $OutputDir "bal_to_jira_$LogDate.csv"
+$CsvFile = Join-Path $ScriptDir "bal_to_jira_$LogDate.csv"
 
 $Mailboxes = @(
     @{ Address = "DFP-UOF-IPED-DIP"; Name = "DFP-UOF-IPED-DIP" },
