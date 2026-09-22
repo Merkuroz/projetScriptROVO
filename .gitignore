@@ -1,0 +1,5 @@
+# Fichiers generes par le script
+log_bal_to_csv_*.txt
+bal_to_jira_*.csv
+processed_msgids.txt
+bal_to_csv.lock
