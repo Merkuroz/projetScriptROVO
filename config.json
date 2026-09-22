@@ -1,0 +1,26 @@
+﻿{
+  "JiraCategory": "a traiter dans Jira",
+  "DefaultAssignee": "frederic.izard@enedis.fr",
+  "DefaultPriority": "Moyenne",
+  "DefaultPriorityBug": "Haute",
+  "MaxFetchPerBal": 50,
+  "MaxMailAgeDays": 0,
+  "RetentionDays": 90,
+  "TraceRetentionDays": 365,
+  "CsvWriteRetries": 5,
+  "Silent": false,
+  "Mailboxes": [
+    { "Address": "DFP-UOF-IPED-DIP", "Name": "DFP-UOF-IPED-DIP", "ProjectKey": "Y6S" },
+    { "Address": "DFP-ADMIN-FORM-MYHR", "Name": "DFP-ADMIN-FORM-MYHR", "ProjectKey": "MHR" }
+  ],
+  "Projects": {
+    "Y6S": { "Key": "Y6S", "Composants": "", "Etiquettes": "" },
+    "MHR": { "Key": "MHR", "Composants": "Injections", "Etiquettes": "" }
+  },
+  "Jira": {
+    "Enabled": false,
+    "BaseUrl": "https://jira.enedis.fr",
+    "Email": "frederic.izard@enedis.fr",
+    "ApiTokenEnvVar": "JIRA_API_TOKEN"
+  }
+}
