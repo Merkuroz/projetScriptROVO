@@ -1,9 +1,10 @@
-<#
+﻿<#
 .SYNOPSIS
   Fonctions du script bal_to_csv_rovo.ps1
   Ce fichier est charge (dot-source) par le script principal et par les tests Pester.
 #>
 
+# ========== NORMALISATION ==========
 function Normalize-Name {
     param([string]$name)
     $name = $name.ToLower()
@@ -13,12 +14,15 @@ function Normalize-Name {
     return $name
 }
 
+# ========== JOURNALISATION ==========
 function Log-Msg {
     param([string]$Level="INFO", [string]$Message)
     $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
     $line = "[$ts] $Level $Message"
-    Write-Host $line -ForegroundColor $(if($Level -eq "ERROR"){"Red"} elseif($Level -eq "WARN"){"Yellow"} elseif($Level -eq "DEBUG"){"DarkGray"} else{"White"})
-    try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 -ErrorAction SilentlyContinue } catch {}
+    if (-not $script:Silent) {
+        Write-Host $line -ForegroundColor $(if($Level -eq "ERROR"){"Red"} elseif($Level -eq "WARN"){"Yellow"} elseif($Level -eq "DEBUG"){"DarkGray"} else{"White"})
+    }
+    try { Add-Content -Path $script:LogFile -Value $line -Encoding UTF8 -ErrorAction SilentlyContinue } catch {}
 }
 
 function Release-ComObject {
@@ -39,14 +43,28 @@ function Get-Config {
         MaxFetchPerBal          = 50
         MaxMailAgeDays          = 0
         RetentionDays           = 90
-        OutlookWebLinkTemplate  = ""
+        TraceRetentionDays      = 365
+        CsvWriteRetries         = 5
+        Silent                  = $false
+        Jira                    = [pscustomobject]@{
+            Enabled      = $false
+            BaseUrl     = ""
+            Email       = ""
+            ApiTokenEnvVar = "JIRA_API_TOKEN"
+        }
     }
     if (Test-Path $Path) {
         try {
             $json = Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
             foreach ($p in $json.PSObject.Properties) {
                 if ($null -ne $p.Value) {
-                    $config | Add-Member -MemberType NoteProperty -Name $p.Name -Value $p.Value -Force
+                    if ($p.Name -eq "Jira" -and $p.Value -is [pscustomobject]) {
+                        foreach ($jp in $p.Value.PSObject.Properties) {
+                            if ($null -ne $jp.Value) { $config.Jira | Add-Member -MemberType NoteProperty -Name $jp.Name -Value $jp.Value -Force }
+                        }
+                    } else {
+                        $config | Add-Member -MemberType NoteProperty -Name $p.Name -Value $p.Value -Force
+                    }
                 }
             }
         } catch {
@@ -95,7 +113,7 @@ function Get-Projects {
     return $default
 }
 
-# ========== FONCTIONS OUTLOOK ==========
+# ========== OUTLOOK ==========
 function Connect-Outlook {
     try {
         $outlook = [System.Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application")
@@ -192,18 +210,28 @@ function Get-OutlookInbox {
 }
 
 function Get-AllMails {
-    param($Inbox, [int]$MaxFetch, [int]$MaxAgeDays = 0)
-    $items = $Inbox.Items
-
-    # Filtre cote Outlook: beaucoup plus rapide que de parcourir tous les elements via COM
-    $filter = "[MessageClass] = 'IPM.Note'"
-    if ($MaxAgeDays -gt 0) {
-        $since = (Get-Date).AddDays(-$MaxAgeDays)
-        $sinceTxt = $since.ToString("MM/dd/yyyy HH:mm tt", [System.Globalization.CultureInfo]::InvariantCulture)
-        $filter += " AND [ReceivedTime] >= '$sinceTxt'"
-        Log-Msg DEBUG "Filtre Outlook: $filter"
+    param($Inbox, [int]$MaxFetch, [int]$MaxAgeDays = 0, [string]$ExcludeCategory = "")
+    # Filtre cote Outlook (DASL): IPM.Note, non categorises, age optionnel.
+    # Beaucoup plus rapide qu'un parcours COM complet, et les mails deja traites
+    # (categorises) ne consomment plus le quota MaxFetch.
+    $PR_MESSAGE_CLASS = '"http://schemas.microsoft.com/mapi/proptag/0x001A001E"'
+    $filter = "@SQL=$PR_MESSAGE_CLASS = 'IPM.Note'"
+    if ($ExcludeCategory -ne "") {
+        $filter += " AND (NOT `"urn:schemas-microsoft-com:office:office#Keywords`" LIKE '%$ExcludeCategory%')"
     }
-    try { $items = $Inbox.Items.Restrict($filter) } catch { Log-Msg WARN "Restrict impossible, parcours complet: $_" }
+    if ($MaxAgeDays -gt 0) {
+        $since = (Get-Date).ToUniversalTime().AddDays(-$MaxAgeDays).ToString("yyyy-MM-ddTHH:mm:ssZ")
+        $filter += " AND `"urn:schemas:httpmail:date`" >= '$since'"
+    }
+    Log-Msg DEBUG "Filtre Outlook: $filter"
+
+    $items = $Inbox.Items
+    try {
+        $items = $Inbox.Items.Restrict($filter)
+    } catch {
+        Log-Msg WARN "Restrict DASL impossible ($_), retour au filtre MessageClass seul"
+        try { $items = $Inbox.Items.Restrict("[MessageClass] = 'IPM.Note'") } catch { Log-Msg WARN "Restrict impossible, parcours complet: $_" }
+    }
 
     try { $items.Sort("[ReceivedTime]", $true) } catch {}
 
@@ -214,7 +242,7 @@ function Get-AllMails {
             if ($item -ne $null -and $item.Class -eq 43) { $mails.Add($item) }
         } catch {}
     }
-    Log-Msg INFO "$($mails.Count) mail(s) trouves"
+    Log-Msg INFO "$($mails.Count) mail(s) a traiter"
     return $mails
 }
 
@@ -309,9 +337,10 @@ function Classify-Mail {
 
 # ========== DEDUPLICATION ==========
 function Get-DeduplicationId {
-    param([string]$MessageId, [string]$Subject, [string]$From, [string]$Body)
+    param([string]$MessageId, [string]$Subject, [string]$From, [string]$Body, [string]$ReceivedTime = "")
     if ($MessageId) { return "mid:$MessageId" }
-    $raw = "$Subject|$From|$Body"
+    # ReceivedTime distingue deux mails au contenu identique (reponses en chaine)
+    $raw = "$Subject|$From|$ReceivedTime|$Body"
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
         $bytes = [System.Text.Encoding]::UTF8.GetBytes($raw)
@@ -324,12 +353,24 @@ function Get-DeduplicationId {
 
 # ========== TRACE D'IMPORT ==========
 function Import-TraceFile {
-    param([string]$Path)
+    param([string]$Path, [int]$RetentionDays = 0)
     $trace = @{}
+    $cutoff = ""
+    if ($RetentionDays -gt 0) { $cutoff = (Get-Date).AddDays(-$RetentionDays).ToString("yyyy-MM-ddTHH:mm:ss") }
     if (Test-Path $Path) {
         foreach ($line in (Get-Content $Path -Encoding UTF8)) {
             $t = $line.Trim()
-            if ($t -ne "" -and -not $trace.ContainsKey($t)) { $trace[$t] = $true }
+            if ($t -eq "") { continue }
+            # Format horodate: "2024-01-01T08:00:00|<id>"; format historique: "<id>"
+            $sep = $t.IndexOf("|")
+            if ($sep -gt 0) {
+                $stamp = $t.Substring(0, $sep)
+                $id = $t.Substring($sep + 1)
+                if ($cutoff -ne "" -and $stamp -lt $cutoff) { continue }
+            } else {
+                $id = $t
+            }
+            if (-not $trace.ContainsKey($id)) { $trace[$id] = $true }
         }
     }
     return $trace
@@ -337,7 +378,17 @@ function Import-TraceFile {
 
 function Save-TraceFile {
     param([string]$Path, $Trace)
-    $Trace.Keys | Out-File -FilePath $Path -Encoding UTF8 -Force
+    # Ecriture atomique: fichier temporaire puis remplacement, pour ne jamais
+    # corrompre la trace en cas de crash au milieu de l'ecriture.
+    $tmp = "$Path.tmp"
+    $lines = foreach ($id in $Trace.Keys) { "$(Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')|$id" }
+    try {
+        [System.IO.File]::WriteAllLines($tmp, $lines, (New-Object System.Text.UTF8Encoding($true)))
+        Move-Item -Path $tmp -Destination $Path -Force
+    } catch {
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        throw
+    }
 }
 
 function Remove-OldLogs {
@@ -404,7 +455,7 @@ function Set-JiraFlag {
 # ========== GENERATION CSV ==========
 function ConvertTo-CsvContent {
     param($Rows)
-    $csvHeaders = @("Projet","Type de ticket","Statut","Resume","Description","Priorite","Assigne","Rapporteur","Date de reception")
+    $csvHeaders = @("Projet","Type de ticket","Statut","Resume","Description","Priorite","Assigne","Rapporteur","Date de reception","Composant","Etiquettes")
     $sb = New-Object System.Text.StringBuilder
     [void]$sb.Append(($csvHeaders -join ";") + "`r`n")
     foreach ($line in $Rows) {
@@ -417,7 +468,9 @@ function ConvertTo-CsvContent {
             $line.Priorite,
             $line.Assigne,
             $line.Rapporteur,
-            $line.Date_de_reception
+            $line.Date_de_reception,
+            $line.Composant,
+            $line.Etiquettes
         ) | ForEach-Object {
             $v = "$_"
             if ($null -eq $_) { $v = "" }
@@ -426,4 +479,76 @@ function ConvertTo-CsvContent {
         [void]$sb.Append(($row -join ";") + "`r`n")
     }
     return $sb.ToString()
+}
+
+function Write-CsvFile {
+    param([string]$Path, [string]$Content, [int]$Retries = 5)
+    $csvDir = Split-Path -Parent $Path
+    if ($csvDir -and -not (Test-Path $csvDir)) { New-Item -ItemType Directory -Path $csvDir -Force | Out-Null }
+    $enc = New-Object System.Text.UTF8Encoding($true)
+    # UTF-8 avec BOM pour une lecture correcte des accents dans Excel FR.
+    # Nouvelles tentatives si le fichier est verrouille (CSV ouvert dans Excel).
+    for ($i = 1; $i -le $Retries; $i++) {
+        try {
+            [System.IO.File]::WriteAllText($Path, $Content, $enc)
+            return $true
+        } catch {
+            if ($i -lt $Retries) {
+                Log-Msg WARN "Ecriture CSV bloquee (tentative $i/$Retries), nouvelle tentative dans 3s: $_"
+                Start-Sleep -Seconds 3
+            } else {
+                Log-Msg ERROR "CSV verrouille, abandon apres $Retries tentatives (fermez le fichier s'il est ouvert): $_"
+            }
+        }
+    }
+    return $false
+}
+
+# ========== IMPORT JIRA (API REST, optionnel) ==========
+function Invoke-JiraImport {
+    param($Rows, $Config)
+    $result = @{ Success = 0; Failed = New-Object System.Collections.Generic.List[string] }
+    $jira = $Config.Jira
+    if (-not $jira.Enabled) { return $result }
+
+    $token = [System.Environment]::GetEnvironmentVariable($jira.ApiTokenEnvVar)
+    if (-not $jira.BaseUrl -or -not $jira.Email -or -not $token) {
+        Log-Msg ERROR "Import Jira active mais configuration incomplete (BaseUrl, Email, ou variable d'environnement '$($jira.ApiTokenEnvVar)' absente)"
+        $result.Failed.Add("Configuration Jira incomplete")
+        return $result
+    }
+
+    try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 } catch {}
+    $pair = "$($jira.Email):$token"
+    $auth = "Basic " + [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($pair))
+    $headers = @{ Authorization = $auth; "Content-Type" = "application/json" }
+    $apiUrl = $jira.BaseUrl.TrimEnd('/') + "/rest/api/2/issue"
+
+    foreach ($row in $Rows) {
+        $fields = [ordered]@{
+            project   = @{ key = $row.Projet }
+            issuetype = @{ name = $row.Type_de_ticket }
+            summary   = $row.Resume
+            priority  = @{ name = $row.Priorite }
+        }
+        if ($row.Assigne) { $fields["assignee"] = @{ name = $row.Assigne } }
+        if ($row.Composant) { $fields["components"] = @(@{ name = $row.Composant }) }
+        if ($row.Etiquettes) {
+            $labels = @($row.Etiquettes -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
+            if ($labels.Count -gt 0) { $fields["labels"] = $labels }
+        }
+        # Le rendu wiki de la description est gere par Jira (le champ Description en API
+        # est interprete comme du texte wiki par defaut sur Jira Server/Data Center).
+        $bodyJson = @{ fields = $fields } | ConvertTo-Json -Depth 5
+        try {
+            $resp = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $bodyJson -ContentType "application/json; charset=utf-8" -ErrorAction Stop
+            Log-Msg INFO "Ticket Jira cree: $($resp.key) - $($row.Resume)"
+            $result.Success++
+        } catch {
+            $msg = "$($row.Resume): $_"
+            Log-Msg ERROR "Echec creation ticket Jira: $msg"
+            $result.Failed.Add($msg)
+        }
+    }
+    return $result
 }
