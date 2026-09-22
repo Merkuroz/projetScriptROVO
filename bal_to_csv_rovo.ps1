@@ -374,7 +374,7 @@ try {
                 $mailLink = "outlook:" + $mail.EntryID
                 $description = $body
                 if ($description.Length -gt 3000) { $description = $description.Substring(0, 3000) + "..." }
-                $description = "$description`r`n`r`nLien vers le mail: $mailLink"
+                $description = "$description`r`n`r`nLien vers le mail: [Ouvrir le mail dans Outlook|$mailLink]"
 
                 if (-not $DryRun) { Set-JiraFlag -Mail $mail }
 
